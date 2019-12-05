@@ -1,0 +1,396 @@
+---
+title: "Analysis of Salary Data in Connecticut"
+author: "Dustin Doose, Lee Halbritter, & Madison Winker"
+date: "Dec 5, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+data=read.csv(file = 'State_Employee_Payroll_Data_Calendar_Year_2015_through_Present.tsv', 
+                sep = '\t', header = TRUE)
+```
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+str(data)
+FT <- data[which(data$Full.Part == "F"), ]         # extract Full Time employees only
+FT <- FT[,-c(2,3,5:9,11:12,15:23,31:33,35:38)]     # drop unwanted variables
+str(FT)
+rm(data)                                           # remove data from environment (save memory etc)
+```
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+EmplId.Empl.Rcd <- as.character(FT$EmplId.Empl.Rcd)
+counts <- data.frame(table(EmplId.Empl.Rcd))
+PersonOccurCount <- table(counts[, 2])
+plot(PersonOccurCount, col = rainbow(30), 
+     xlab = "Occurance of employee", ylab = "Count of employee")
+```
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+subEmpl128 <- counts[which(counts$Freq != 128), ]
+len <- length(subEmpl128$EmplId.Empl.Rcd)
+for(i in 1:len){
+    print(i)
+    j <- which(FT$EmplId.Empl.Rcd == as.character(subEmpl128$EmplId.Empl.Rcd)[i])
+    if(i == 1) id = j
+    else if(i > 1) id = c(id, j)
+}
+FT128checks <- FT[-id, ]   # remove employees with check count not equal 128
+rm(FT)
+```
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+summary(FT128checks$Sex)
+FT128checks <- subset(FT128checks, Sex != "U")      # drop 2 records which had U designation
+
+salary <- FT128checks
+subGross0 <- salary[which(salary$Tot.Gross <= 0 | salary$Bi.Weekly.Comp.Rate <= 0), ]
+len <- length(unique(subGross0$EmplId.Empl.Rcd))
+for(i in 1:len){
+    j <- which(salary$EmplId.Empl.Rcd == unique(subGross0$EmplId.Empl.Rcd)[i])
+    print(i)
+    if(i == 1) id = j
+    else if(i > 1) id = c(id, j)
+  }
+salary <- salary[-id, ]  #remove employees with negative or zero Tot.Gross and Bi.Weekly.Comp.Rate
+```
+
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+salary <- subset(salary, Pyrl.Fiscal.Yr != 2020)   # drop fiscal year 2020 & 2015 since it's only partial
+salary <- subset(salary, Pyrl.Fiscal.Yr != 2015)
+df <- salary %>% 
+  group_by(EmplId.Empl.Rcd, Ethnic.Grp) %>%
+  summarise(Total.Gross = sum(Tot.Gross ))
+dupliEthnic.Grp <- df[duplicated(df$EmplId.Empl.Rcd), ]
+
+len <- length(dupliEthnic.Grp$EmplId.Empl.Rcd)
+for(i in 1:len){
+    print(i)
+    j <- which(salary$EmplId.Empl.Rcd == as.character(dupliEthnic.Grp$EmplId.Empl.Rcd)[i])
+    if(i == 1) id = j
+    else if(i > 1) id = c(id, j)
+}
+salary2 <- salary[-id, ]   # remove employees with conflicting ethnic entries
+salary3 <- subset(salary2, Ethnic.Grp != "")
+salary3$Ethnic.Grp <- factor(salary3$Ethnic.Grp)          # drop empty Sex and Ethnic factor levels
+salary3$Sex <- factor(salary3$Sex)
+```
+
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+subIndicator <- salary3[which(salary3$Job.Indicator == "S"), ]
+len <- length(unique(subIndicator$EmplId.Empl.Rcd))
+for(i in 1:len){
+    j <- which(salary3$EmplId.Empl.Rcd == unique(subIndicator$EmplId.Empl.Rcd)[i])
+    print(i)
+    if(i == 1) id = j
+    else if(i > 1) id = c(id, j)
+  }
+salary4 <- salary3[-id, ]  #remove employees with Job indicator as "S"  (student jobs)
+```
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(data.table)
+salary4$Age <- round(salary4$Age, digits=0)
+setDT(salary4)[Age <20, agegroup := "Teens"]
+salary4[Age >19 & Age <30, agegroup := "20's"]
+salary4[Age >29 & Age <40, agegroup := "30's"]
+salary4[Age >39 & Age <50, agegroup := "40's"]      # create age groups
+salary4[Age >49 & Age <60, agegroup := "50's"]
+salary4[Age >59 & Age <70, agegroup := "60's"]
+salary4[Age >69 & Age <80, agegroup := "70's"]
+salary4[Age >79, agegroup := "80+"]
+
+data <- salary4           # "data" is now the working file we're using
+rm(salary4)
+rm(salary3)               # clean up work space a little by removing larger data sets
+rm(salary2)
+rm(salary)
+rm(FT128checks)
+rm(Check.Dt)
+rm(EmplId.Empl.Rcd)
+
+write.csv(data, file = "salary.csv", row.names = FALSE)     # back up clean data to csv
+
+set.seed(123)
+samples <- sample(1:nrow(data), 50000)
+write.csv(data[samples,], file = "samples.csv", row.names = FALSE)  # get smaller sample file
+```
+
+
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(plyr)
+library(lattice)
+library(ggplot2)
+library(gridExtra)
+c <- sort(table(data$Job.Cd.Descr),decreasing=T)      # find most common jobs
+```
+
+Dealing with large data sets can be a daunting task, especially when that data requires quite a bit of manipulation and clean up.  Four years of salary data from the state of Connecticut is an example of a large data set in need to cleaning.  The goal of this endeavor is to explore salary data and rise in pay as it pertains to males and females across various categories such as age, location, or job type.  Before diving into very specific categories, we’ll first take a broad look at the average salaries over the past four years regardless of age, ethnicity, or job.  While this isn’t a deeply informative graph, it gives an idea of what we may encounter with just a first glance.
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+AvgSexYear <- aggregate(Annnual.Rate ~ Sex + Pyrl.Fiscal.Yr, data = data, mean)
+AvgSexYear$Pyrl.Fiscal.Yr <- factor(AvgSexYear$Pyrl.Fiscal.Yr)
+barchart(Annnual.Rate~Pyrl.Fiscal.Yr, groups=Sex, AvgSexYear, auto.key=list(columns=2))
+```
+
+
+<br><br>
+
+
+The above plot shows a steady increase in pay for both genders, however the gap in pay between males and females also appears to stay fairly consistent overall.  Let's focus for a moment on the rate of pay increase for each gender.
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+AvgSexYear$Increase <- 0
+for(i in 3:8){
+    AvgSexYear$Increase[i]=
+      100*((AvgSexYear$Annnual.Rate[i]-AvgSexYear$Annnual.Rate[i-2])
+           /AvgSexYear$Annnual.Rate[i-2])
+}
+xyplot(Increase~Pyrl.Fiscal.Yr, type=c('l','p'), groups=Sex, 
+       data=AvgSexYear,auto.key=T, xlab="Year", ylab="% Increase")
+```
+
+
+<br><br>
+
+
+The graph above shows that both genders saw an annual increase in pay, males received a slightly higher increase.  Note the increase shown for 2016 is zero since no prior data was included in the analysis.  Suppose we separate the groups further by ethnicity?  Will the same trends hold or will there be different behavior across the various ethnic groups?
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+AvgEthYear <- aggregate(Annnual.Rate ~ Sex + Pyrl.Fiscal.Yr + Ethnic.Grp, data = data, mean)
+
+AvgEthYear$Pyrl.Fiscal.Yr <- factor(AvgSexYear$Pyrl.Fiscal.Yr)
+AvgEthYear$Increase <- 0
+for(i in 3:56){
+    AvgEthYear$Increase[i]=
+      100*((AvgEthYear$Annnual.Rate[i]-AvgEthYear$Annnual.Rate[i-2])
+           /AvgEthYear$Annnual.Rate[i-2])
+}
+AvgEthYear[c(1:2,9:10,17:18,25:26,33:34,41:42,49:50),5] <- 0
+AvgEthYear_White <- subset(AvgEthYear, Ethnic.Grp == "WHITE")
+AvgEthYear_AmInd <- subset(AvgEthYear, Ethnic.Grp == "AMIND")
+AvgEthYear_Asian <- subset(AvgEthYear, Ethnic.Grp == "ASIAN")
+AvgEthYear_Black <- subset(AvgEthYear, Ethnic.Grp == "BLACK")
+AvgEthYear_Hisp <- subset(AvgEthYear, Ethnic.Grp == "HISPA")
+AvgEthYear_Pac <- subset(AvgEthYear, Ethnic.Grp == "PACIF")
+p1 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_White,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="White")
+p2 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_AmInd,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="AmInd")
+p3 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_Asian,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Asian")
+p4 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_Black,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Black")
+p5 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_Hisp,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Hispanic")
+p6 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgEthYear_Pac,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Pacific")
+grid.arrange(p1,p2,p3,p4,p5,p6, ncol=3)
+```
+
+
+<br><br>
+
+
+The plots above actually show some different trends.  First and foremost, in the American Indian and Pacific groups, females actually received higher increases with the exception of 2019 where female Native Americans actually received a decrease in pay.  The other ethnic groups all held a similar trend to what we observed in the overall data.
+<br>
+Let’s set ethnicity aside now for the moment and look at some of the most common jobs and how their pay increases were distributed.
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+data_jobs <- subset(data, Job.Cd.Descr == "JudicialEmployee" |
+                          Job.Cd.Descr == "CorrectionOfficer" |          # select some of the most
+                          Job.Cd.Descr == "SW-Socl&HumanSvcs" |          # common jobs
+                          Job.Cd.Descr == "Custodian" |
+                          Job.Cd.Descr == "UCHC UniversityHealthProf" |
+                          Job.Cd.Descr == "AdministrativeAssistant")
+AvgJobYear <- aggregate(Annnual.Rate ~ Sex + Pyrl.Fiscal.Yr + Job.Cd.Descr, data = data_jobs, mean)
+AvgJobYear$Pyrl.Fiscal.Yr <- factor(AvgJobYear$Pyrl.Fiscal.Yr)
+AvgJobYear$Job.Cd.Descr <- factor(AvgJobYear$Job.Cd.Descr)
+AvgJobYear$Increase <- 0
+for(i in 3:48){
+    AvgJobYear$Increase[i]=
+      100*((AvgJobYear$Annnual.Rate[i]-AvgJobYear$Annnual.Rate[i-2])
+           /AvgJobYear$Annnual.Rate[i-2])
+}
+AvgJobYear[c(1:2,9:10,17:18,25:26,33:34,41:42),5] <- 0
+AvgJobYear_Jud <- subset(AvgJobYear, Job.Cd.Descr == "JudicialEmployee")
+AvgJobYear_Cor <- subset(AvgJobYear, Job.Cd.Descr == "CorrectionOfficer")
+AvgJobYear_Soc <- subset(AvgJobYear, Job.Cd.Descr == "SW-Socl&HumanSvcs")
+AvgJobYear_Cust <- subset(AvgJobYear, Job.Cd.Descr == "Custodian")
+AvgJobYear_Health <- subset(AvgJobYear, Job.Cd.Descr == "UCHC UniversityHealthProf")
+AvgJobYear_Admin <- subset(AvgJobYear, Job.Cd.Descr == "AdministrativeAssistant")
+p1 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Jud,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Judicial Employees")
+p2 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Cor,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Corrections Officers")
+p3 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Soc,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Social Workers / Human Services")
+p4 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Cust,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Custodians")
+p5 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Health,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Univ Health Prof")
+p6 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgJobYear_Admin,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="Administrative Assistants")
+grid.arrange(p1,p2,p3,p4,p5,p6, ncol=3)
+```
+
+
+<br><br>
+
+
+Several of the most frequent occupations in the data were chosen to observe the pay increase trends again.  Here we see a variety of results.  Judicial Employees, Corrections Officers, and Custodians followed the same general trend as the overall data originally observed.  Males received slightly higher annual increases.  However, the trends were different for Social/Human Services, University Health Professors, and Administrative Assistants.  Females fared better in Social/Human Services, though the field as a whole took a reduction in pay from the 2016 level.  Administrative Assistants were fairly flat at around 0% until the whole field took a dip in 2019, males in particular.
+<br>
+Now let's observe the trends when we take age into account.
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+AvgAgeYear <- aggregate(Annnual.Rate ~ Sex + Pyrl.Fiscal.Yr + agegroup, data = data, mean)
+AvgAgeYear <- subset(AvgAgeYear, agegroup != "Teens")
+AvgAgeYear$Pyrl.Fiscal.Yr <- factor(AvgAgeYear$Pyrl.Fiscal.Yr)
+AvgAgeYear$agegroup <- factor(AvgAgeYear$agegroup)
+AvgAgeYear$Increase <- 0
+for(i in 3:56){
+    AvgAgeYear$Increase[i]=
+      100*((AvgAgeYear$Annnual.Rate[i]-AvgAgeYear$Annnual.Rate[i-2])
+           /AvgAgeYear$Annnual.Rate[i-2])
+}
+AvgAgeYear[c(1:2,9:10,17:18,25:26,33:34,41:42,49:50),5] <- 0
+AvgAgeYear_20 <- subset(AvgAgeYear, agegroup == "20's")
+AvgAgeYear_30 <- subset(AvgAgeYear, agegroup == "30's")
+AvgAgeYear_40 <- subset(AvgAgeYear, agegroup == "40's")
+AvgAgeYear_50 <- subset(AvgAgeYear, agegroup == "50's")
+AvgAgeYear_60 <- subset(AvgAgeYear, agegroup == "60's")
+AvgAgeYear_70 <- subset(AvgAgeYear, agegroup == "70's")
+AvgAgeYear_80 <- subset(AvgAgeYear, agegroup == "80+")
+p1 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_20,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="20's")
+p2 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_30,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="30,s")
+p3 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_40,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="40's")
+p4 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_50,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="50's")
+p5 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_60,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="60's")
+p6 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+             data=AvgAgeYear_70,auto.key=T, xlab="Year", 
+             ylab="% Increase", main="70's")
+#p7 <- xyplot(Increase~Pyrl.Fiscal.Yr, type='l', groups=Sex, 
+#             data=AvgAgeYear_80,auto.key=T, xlab="Year", 
+#             ylab="% Increase", main="80+")
+grid.arrange(p1,p2,p3,p4,p5,p6, ncol=3)
+```
+
+
+<br><br>
+
+
+Looking at the age breakdown, it appears that males tend to get larger increases in their 20s and 30s before females gradually overtake them.  The discrepancy between the increases is at its largest at the extreme ends of the age range.  Over the middle of the age range, the rates are fairly close together.
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+ggplot(data, aes(x = data$Annnual.Rate, color = data$Sex)) +
+  geom_density() +
+  facet_wrap(data$Pyrl.Fiscal.Yr) +
+  xlim(0,200000) +
+  geom_vline(aes(xintercept = mean(Annnual.Rate, na.rm = T)), 
+             color = "black", linetype = "dashed", size = 0.5) +
+  geom_vline(aes(xintercept = median(Annnual.Rate, na.rm = T)), 
+             color = "black", linetype = "solid", size = 0.5) +
+  labs(color = "Sex", 
+       title = "Annual Pay Distribution by Sex",
+       subtitle = "From 2016 to 2019") +
+  xlab("Annual Pay")
+```
+
+
+<br><br>
+
+Now looking at the density plots for annual salary for each year, we see that both distributions are skewed slightly to the high side.  This is illustrated by the fact that the mean (dashed line) is greater than the median (solid line) in each year.  We actually see the male distribution is denser on the low end than the female distribution.
+
+<br><br>
+
+Finally, one thing we notice about most of the previous plots was that 2017 saw a consistently larger pay increase for both genders across many ethinic, age, and job groups.  While there are of course exceptions to this, it did appear to be a common theme.  Let's see if we can quantify this at all.  Did 2017 specifically treat everyone equally well, or did men still make out better?
+
+
+<br><br>
+
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+Age2017Increase <- subset(AvgAgeYear, Pyrl.Fiscal.Yr == 2017)
+x <- aov(Increase~agegroup+Sex, data=Age2017Increase)
+anova(x)
+Eth2017Increase <- subset(AvgEthYear, Pyrl.Fiscal.Yr == 2017)
+y <- aov(Increase~Ethnic.Grp+Sex, data=Eth2017Increase)
+anova(y)
+```
+
+
+<br><br>
+
+Using a one-way ANOVA test, we look at the average pay increase across each age group and each gender.  For the one-way ANOVA test, the Null Hypothesis is that the mean of each group is equal.  Here we see p-values in excess of 0.2 indicating that the pay increases in 2017 could be assumed to be the same across the board for age or gender.
+
+<br>
+
+However, when we look at gender and ethnicity, we do see a borderline p-value for ethnicity indicating that at least one ethnic group differed from the rest.  Indeed we can see this visually from the previous plots.  Recall in the age group plots, all of the values in 2017 were between 1.5 and 4 percent.  However, when we look at the plots for ethnic groups, we see a wider range going from about 1.3 to as much as 6 percent.
+
+<br>
+
+In the end, 2017 looked to benefit males and females about equally over all, though there was a greater disparity between different ethnic groups.
